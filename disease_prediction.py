@@ -57,14 +57,26 @@ if 'selected_symptoms' not in st.session_state:
 def display_dropdowns():
     for i in range(len(st.session_state.selected_symptoms)):
         options = ['Please Select'] + sorted(set(symptoms_list) - set(st.session_state.selected_symptoms[:i] + st.session_state.selected_symptoms[i+1:]))
-        selected_symptom = st.session_state.selected_symptoms[i]
-        selected_index = options.index(selected_symptom) if selected_symptom in options else 0
+
+        # Initialize session state for the typed value if not already set
+        if f"typed_{i}" not in st.session_state:
+            st.session_state[f"typed_{i}"] = ""
+
+        def on_select_change():
+            typed_value = st.session_state[f"typed_{i}"].strip()
+            if typed_value in symptoms_list:
+                st.session_state.selected_symptoms[i] = typed_value
+            elif st.session_state.selected_symptoms[i] not in symptoms_list:
+                st.session_state.selected_symptoms[i] = 'Please Select'
+
         selected_symptom = st.selectbox(
             f"Symptom {i+1}",
             options=options,
-            index=selected_index,
-            key=f"dropdown_{i}"
+            index=options.index(st.session_state.selected_symptoms[i]) if st.session_state.selected_symptoms[i] in options else 0,
+            key=f"dropdown_{i}",
+            on_change=on_select_change
         )
+
         st.session_state.selected_symptoms[i] = selected_symptom
 
     if len(st.session_state.selected_symptoms) < 17:
@@ -79,12 +91,13 @@ with col1:
     display_dropdowns()
 
 # Filter out 'Please Select' from the final symptom list
-final_selected_symptoms = [symptom for symptom in st.session_state.selected_symptoms if symptom != 'Please Select']
+final_selected_symptoms = [symptom for symptom in st.session_state.selected_symptoms if symptom != 'Please Select' and symptom in symptoms_list]
 
 # Placeholder for the pie chart
 with col2:
     if len(final_selected_symptoms) < 5:
         fig = px.pie(names=["Please make symptom selections to generate probable disease cause"], values=[100], title="Awaiting Input")
+        st.markdown("**User must select at least 5 symptoms for Predict to be enabled**", unsafe_allow_html=True)
         st.plotly_chart(fig)
     else:
         # Limit number of selected symptoms to 17
@@ -135,7 +148,7 @@ with col2:
                 best_match_idx = df[df['Disease'] == best_match_disease].index[0]
                 predictions[0][best_match_idx] *= 1.2
 
-            # Random selection for close predictions
+            # Selection for close predictions
             sorted_predictions = np.sort(predictions[0])[::-1]
             if sorted_predictions[0] - sorted_predictions[1] < 13.5:
                 chosen_idx = random.choice([0, 1])
@@ -166,9 +179,13 @@ with col2:
             st.plotly_chart(fig)
 
             # Display additional disease suggestions
+            remaining_diseases = prediction_df.iloc[5:].index.tolist()
+            additional_diseases = random.sample(remaining_diseases, min(4, len(remaining_diseases)))
             st.write("Here are additional diseases the medical provider may want to consider, accompanied by lab work, diagnoses, and care suggestions.")
-            st.write("Asthma, Pancreatitis, Diabetes, Irritable Bowel Syndrome")
-            st.write("This data was pulled from the CDC using their research studies on listed diseases and symptoms.")
+            st.write(", ".join(additional_diseases))
+            st.write("""
+            This data was pulled from the CDC using their research studies on listed diseases and symptoms. Please note that these predictions are not definitive diagnoses and should be used as a guide to aid in clinical decision-making. For accurate diagnosis and treatment, medical professionals should rely on comprehensive clinical evaluation and testing.
+            """)
 
 # Custom styling for a medical-themed look with a smooth background image
 st.markdown("""
