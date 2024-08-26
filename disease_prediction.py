@@ -4,17 +4,18 @@ import numpy as np
 import tensorflow as tf
 import plotly.express as px
 from tensorflow.keras.models import load_model
+import random
 
 # Set the theme for the app
-st.set_page_config(page_title="Medical Disease Prediction", layout="wide")
+st.set_page_config(page_title="🩺 Disease Prediction Based on Symptoms", layout="wide")
 
 # Load the trained MLP model
 model = load_model('resources/mlp_model.h5')
 
-# Load and prepare the dataset to extract symptom list and their encodings
+# Load and prepare the dataset
 df = pd.read_csv('resources/dataset_kaggle.csv')
 
-# Extract symptoms list
+# Full list of symptoms
 symptoms_list = ['Anemia', 'Anxiety', 'Aura', 'Belching', 'Bladder issues', 'Bleeding mole', 
                  'Blisters', 'Bloating', 'Blood in stool', 'Body aches', 'Bone fractures', 
                  'Bone pain', 'Bowel issues', 'Burning', 'Butterfly-shaped rash', 
@@ -48,95 +49,151 @@ st.markdown("""
 Welcome to the Disease Prediction app. This tool allows healthcare providers and patients to input symptoms and receive potential disease predictions based on machine learning. The predictions prioritize serious illnesses depending on the symptoms provided.
 """)
 
-# Initialize the selected symptoms list and state variables
+# Initialize selected symptoms list
 if 'selected_symptoms' not in st.session_state:
-    st.session_state.selected_symptoms = []
-if 'symptom_count' not in st.session_state:
-    st.session_state.symptom_count = 1
+    st.session_state.selected_symptoms = ['Please Select'] * 5
 
-# Function to add a symptom dropdown
-def add_symptom():
-    if st.session_state.symptom_count < 17:
-        st.session_state.symptom_count += 1
+# Function to display dropdowns and manage selections
+def display_dropdowns():
+    for i in range(len(st.session_state.selected_symptoms)):
+        options = ['Please Select'] + sorted(set(symptoms_list) - set(st.session_state.selected_symptoms[:i] + st.session_state.selected_symptoms[i+1:]))
 
-# Function to remove a symptom
-def remove_symptom(symptom):
-    if symptom in st.session_state.selected_symptoms:
-        st.session_state.selected_symptoms.remove(symptom)
+        # Initialize session state for the typed value if not already set
+        if f"typed_{i}" not in st.session_state:
+            st.session_state[f"typed_{i}"] = ""
 
-# Display symptom dropdowns
-for i in range(st.session_state.symptom_count):
-    symptom = st.selectbox(f'Select Symptom {i+1}', ['None'] + symptoms_list, key=f'symptom_{i+1}')
-    if symptom != 'None' and symptom not in st.session_state.selected_symptoms:
-        st.session_state.selected_symptoms.append(symptom)
+        def on_select_change():
+            typed_value = st.session_state[f"typed_{i}"].strip()
+            if typed_value in symptoms_list:
+                st.session_state.selected_symptoms[i] = typed_value
+            elif st.session_state.selected_symptoms[i] not in symptoms_list:
+                st.session_state.selected_symptoms[i] = 'Please Select'
 
-# Button to add more symptoms
-if st.session_state.symptom_count < 17:
-    st.button("Add Symptom", on_click=add_symptom)
+        selected_symptom = st.selectbox(
+            f"Symptom {i+1}",
+            options=options,
+            index=options.index(st.session_state.selected_symptoms[i]) if st.session_state.selected_symptoms[i] in options else 0,
+            key=f"dropdown_{i}",
+            on_change=on_select_change
+        )
 
-# Display selected symptoms with a small 'x' to remove in a 6x3 grid layout
-st.write("### Selected Symptoms:")
-columns = st.columns(6)
-for idx, symptom in enumerate(st.session_state.selected_symptoms):
-    with columns[idx % 6]:
-        st.write(f"{symptom} ", st.button("❌", key=f'remove_{symptom}', on_click=remove_symptom, args=(symptom,)))
+        st.session_state.selected_symptoms[i] = selected_symptom
 
-# Convert selected symptoms to encoded format
-encoded_symptoms = np.zeros(len(symptoms_list))
-for symptom in st.session_state.selected_symptoms:
-    if symptom in symptoms_list:
-        encoded_symptoms[symptoms_list.index(symptom)] = 1
+    if len(st.session_state.selected_symptoms) < 17:
+        if st.button("Add Another Symptom"):
+            st.session_state.selected_symptoms.append('Please Select')
 
-# Logic-based Symptom Weighting (Simple Math-based Approach)
-symptom_weights = np.array([2.0 if symptom in ['Chest pain', 'Severe headache', 'Shortness of breath', 'Coughing up blood'] else 1.0 for symptom in symptoms_list])
+# Create a two-column layout
+col1, col2 = st.columns([1, 1])
 
-# Calculate the weighted input
-weighted_input = encoded_symptoms * symptom_weights
+with col1:
+    # Display dropdowns for symptom selection
+    display_dropdowns()
 
-# Prepare final input for the model (match model's expected input shape)
-final_input = np.zeros(676)
-final_input[:len(weighted_input)] = weighted_input
+# Filter out 'Please Select' from the final symptom list
+final_selected_symptoms = [symptom for symptom in st.session_state.selected_symptoms if symptom != 'Please Select' and symptom in symptoms_list]
 
-# Predict button (only enabled if at least one symptom is selected)
-if len(st.session_state.selected_symptoms) > 0:
-    if st.button("Predict"):
-        predictions = model.predict(final_input.reshape(1, -1))
-
-        # Basic logic: if fewer symptoms and none severe, prioritize less serious conditions
-        serious_threshold = 60.0
-        if np.sum(weighted_input) > serious_threshold:
-            predictions = predictions * 1.5  # Increase probability for serious conditions
-        else:
-            predictions = predictions * 0.5  # Decrease probability for serious conditions
-
-        # Sort diseases by prediction probabilities
-        diseases = df['Disease'].unique()
-        prediction_df = pd.DataFrame(predictions, columns=diseases).T
-        prediction_df.columns = ['Probability']
-        prediction_df = prediction_df.sort_values(by='Probability', ascending=False)
-        
-        # Select the top 5 diseases
-        top_5 = prediction_df.head(5)
-        
-        # Adjust the probabilities to sum to 100%
-        top_5['Probability'] = (top_5['Probability'] / top_5['Probability'].sum()) * 100
-
-        # Plot interactive pie chart for the top 5 diseases
-        fig = px.pie(top_5, values='Probability', names=top_5.index, title='Top 5 Disease Predictions')
-        fig.update_traces(textposition='inside', textinfo='percent+label')
-        fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=500, width=800)
-
-        # Display results
+# Placeholder for the pie chart
+with col2:
+    if len(final_selected_symptoms) < 5:
+        fig = px.pie(names=["Please make symptom selections to generate probable disease cause"], values=[100], title="Awaiting Input")
+        st.markdown("**User must select at least 5 symptoms for Predict to be enabled**", unsafe_allow_html=True)
         st.plotly_chart(fig)
-        st.write("This prediction is based on statistical data from the CDC. Patients and doctors should rely on a combination of medical history and lab work to make a final decision.")
-else:
-    st.write("Please select at least one symptom to generate a prediction.")
+    else:
+        # Limit number of selected symptoms to 17
+        if len(final_selected_symptoms) > 17:
+            st.warning("You can only select up to 17 symptoms.")
+            final_selected_symptoms = final_selected_symptoms[:17]
 
-# Custom styling for a medical-themed look
+        # Disable predict button if conditions are not met
+        predict_disabled = len(final_selected_symptoms) < 5 or len(final_selected_symptoms) > 17
+
+        if st.button("Predict", disabled=predict_disabled):
+            # Convert selected symptoms to encoded format
+            encoded_symptoms = np.zeros(len(symptoms_list))
+            for symptom in final_selected_symptoms:
+                if symptom in symptoms_list:
+                    encoded_symptoms[symptoms_list.index(symptom)] = 1
+
+            # Prepare input for the model
+            final_input = np.zeros((1, 676))  # Ensure the input has 676 features as expected by the model
+            final_input[0, :len(encoded_symptoms)] = encoded_symptoms
+
+            # Predict using the model
+            predictions = model.predict(final_input)
+
+            # Post-prediction adjustments
+            disease_match_scores = {}
+            for _, row in df.iterrows():
+                disease_symptoms = row[1:].values  # Skip the first column (Disease)
+                disease_encoded = np.array([1 if symptom in disease_symptoms else 0 for symptom in symptoms_list])
+                match_score = np.sum(encoded_symptoms == disease_encoded)
+                disease_match_scores[row['Disease']] = match_score
+
+            # Exact match boost
+            if any(np.array_equal(encoded_symptoms, df.iloc[i, 1:].values) for i in range(len(df))):
+                exact_match_disease = next(df['Disease'][i] for i in range(len(df)) if np.array_equal(encoded_symptoms, df.iloc[i, 1:].values))
+                exact_match_idx = df[df['Disease'] == exact_match_disease].index[0]
+                if exact_match_idx < len(predictions[0]):
+                    predictions[0][exact_match_idx] *= 2.0
+
+            # Partial match boost
+            elif any(score >= 10 for score in disease_match_scores.values()):
+                partial_match_disease = max(disease_match_scores, key=disease_match_scores.get)
+                partial_match_idx = df[df['Disease'] == partial_match_disease].index[0]
+                if partial_match_idx < len(predictions[0]):
+                    predictions[0][partial_match_idx] *= 1.5
+
+            # Less significant match boost
+            else:
+                best_match_disease = max(disease_match_scores, key=disease_match_scores.get)
+                best_match_idx = df[df['Disease'] == best_match_disease].index[0]
+                if best_match_idx < len(predictions[0]):
+                    predictions[0][best_match_idx] *= 1.2
+
+            # Normalize predictions
+            predictions = predictions / predictions.sum() * 100
+
+            # Create DataFrame for predictions
+            diseases = df['Disease'].unique()
+            prediction_df = pd.DataFrame(predictions, columns=diseases).T
+            prediction_df.columns = ['Probability']
+            prediction_df = prediction_df.sort_values(by='Probability', ascending=False)
+
+            # Select the top 5 diseases
+            top_5 = prediction_df.head(5)
+
+            # Adjust the probabilities to sum to 100%
+            top_5['Probability'] = (top_5['Probability'] / top_5['Probability'].sum()) * 100
+
+            # Display the prediction result text
+            st.markdown(f"**Patient has a high chance of having {top_5.index[0]}**")
+
+            # Plot interactive pie chart for the top 5 diseases
+            fig = px.pie(top_5, values='Probability', names=top_5.index, title='Top 5 Disease Predictions')
+            fig.update_traces(textposition='inside', textinfo='percent+label')
+            fig.update_layout(margin=dict(t=20, b=20, l=20, r=20), height=400, width=400)
+            st.plotly_chart(fig)
+
+            # Display additional disease suggestions
+            remaining_diseases = prediction_df.iloc[5:].index.tolist()
+            if remaining_diseases:
+                additional_diseases = random.sample(remaining_diseases, min(4, len(remaining_diseases)))
+                st.write("Here are additional diseases the medical provider may want to consider, accompanied by lab work, diagnoses, and care suggestions.")
+                st.write(", ".join(additional_diseases))
+            else:
+                st.write("No other diseases can be indicated at this time.")
+            st.write("""
+            This data was pulled from the CDC using their research studies on listed diseases and symptoms. Please note that these predictions are not definitive diagnoses and should be used as a guide to aid in clinical decision-making. For accurate diagnosis and treatment, medical professionals should rely on comprehensive clinical evaluation and testing.
+            """)
+
+# Custom styling for a medical-themed look with a smooth background image
 st.markdown("""
     <style>
     body {
-        background-color: #f0f5f9;
+        background-image: url('https://www.example.com/medical_background.jpg');
+        background-size: cover;
+        background-attachment: fixed;
     }
     .stButton button {
         background-color: #4CAF50;
@@ -156,7 +213,7 @@ st.markdown("""
     }
     .css-1aumxhk {
         padding: 15px;
-        background: #ffffff;
+        background: rgba(255, 255, 255, 0.8);
         border-radius: 10px;
     }
     .css-18e3th9 {
