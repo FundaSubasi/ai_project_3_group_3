@@ -116,7 +116,7 @@ with col2:
                     encoded_symptoms[symptoms_list.index(symptom)] = 1
 
             # Prepare input for the model
-            final_input = np.zeros((1, 676))
+            final_input = np.zeros((1, 676))  # Ensure the input has 676 features as expected by the model
             final_input[0, :len(encoded_symptoms)] = encoded_symptoms
 
             # Predict using the model
@@ -134,25 +134,22 @@ with col2:
             if any(np.array_equal(encoded_symptoms, df.iloc[i, 1:].values) for i in range(len(df))):
                 exact_match_disease = next(df['Disease'][i] for i in range(len(df)) if np.array_equal(encoded_symptoms, df.iloc[i, 1:].values))
                 exact_match_idx = df[df['Disease'] == exact_match_disease].index[0]
-                predictions[0][exact_match_idx] *= 2.0
+                if exact_match_idx < len(predictions[0]):
+                    predictions[0][exact_match_idx] *= 2.0
 
             # Partial match boost
             elif any(score >= 10 for score in disease_match_scores.values()):
                 partial_match_disease = max(disease_match_scores, key=disease_match_scores.get)
                 partial_match_idx = df[df['Disease'] == partial_match_disease].index[0]
-                predictions[0][partial_match_idx] *= 1.5
+                if partial_match_idx < len(predictions[0]):
+                    predictions[0][partial_match_idx] *= 1.5
 
             # Less significant match boost
             else:
                 best_match_disease = max(disease_match_scores, key=disease_match_scores.get)
                 best_match_idx = df[df['Disease'] == best_match_disease].index[0]
-                predictions[0][best_match_idx] *= 1.2
-
-            # Selection for close predictions
-            sorted_predictions = np.sort(predictions[0])[::-1]
-            if sorted_predictions[0] - sorted_predictions[1] < 13.5:
-                chosen_idx = random.choice([0, 1])
-                predictions[0][chosen_idx] *= 1.5
+                if best_match_idx < len(predictions[0]):
+                    predictions[0][best_match_idx] *= 1.2
 
             # Normalize predictions
             predictions = predictions / predictions.sum() * 100
@@ -180,9 +177,12 @@ with col2:
 
             # Display additional disease suggestions
             remaining_diseases = prediction_df.iloc[5:].index.tolist()
-            additional_diseases = random.sample(remaining_diseases, min(4, len(remaining_diseases)))
-            st.write("Here are additional diseases the medical provider may want to consider, accompanied by lab work, diagnoses, and care suggestions.")
-            st.write(", ".join(additional_diseases))
+            if remaining_diseases:
+                additional_diseases = random.sample(remaining_diseases, min(4, len(remaining_diseases)))
+                st.write("Here are additional diseases the medical provider may want to consider, accompanied by lab work, diagnoses, and care suggestions.")
+                st.write(", ".join(additional_diseases))
+            else:
+                st.write("No other diseases can be indicated at this time.")
             st.write("""
             This data was pulled from the CDC using their research studies on listed diseases and symptoms. Please note that these predictions are not definitive diagnoses and should be used as a guide to aid in clinical decision-making. For accurate diagnosis and treatment, medical professionals should rely on comprehensive clinical evaluation and testing.
             """)
